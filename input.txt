@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"list_tools","params":{},"id":1}

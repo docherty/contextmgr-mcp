@@ -1,6 +1,6 @@
 import type { JSONSchema7 } from 'json-schema';
 import { BaseTool } from './base.js';
-import { TaskState, Result, FileChange } from '../types.js';
+import { Result, TaskState, FileChange } from '../types.js';
 
 export class CreateTaskTool extends BaseTool {
   name = 'create_task';
@@ -20,43 +20,19 @@ export class CreateTaskTool extends BaseTool {
         type: "string",
         description: "Task description"
       },
-      priority: {
-        type: "number",
-        description: "Priority level (1-5)",
-        minimum: 1,
-        maximum: 5
-      },
       filePath: {
         type: "string",
-        description: "Path to the file this task will modify"
+        description: "Primary file associated with the task"
       }
     },
     required: ["workPackageId", "name"]
   };
 
-  async execute(input: {
-    workPackageId: string;
-    name: string;
-    description?: string;
-    priority?: number;
-    filePath?: string;
-  }): Promise<Result<TaskState>> {
-    const metadata = {
-      name: input.name,
+  async execute(input: { workPackageId: string; name: string; description?: string; filePath?: string }): Promise<Result<TaskState>> {
+    return this.stateManager.createTask(input.workPackageId, input.name, {
       description: input.description,
-      priority: input.priority || 3,
       filePath: input.filePath
-    };
-
-    return this.stateManager.createTask(
-      input.workPackageId,
-      input.name,
-      {
-        description: input.description,
-        priority: input.priority || 3,
-        filePath: input.filePath
-      }
-    );
+    });
   }
 }
 
@@ -79,10 +55,7 @@ export class UpdateTaskStatusTool extends BaseTool {
     required: ["taskId", "status"]
   };
 
-  async execute(input: {
-    taskId: string;
-    status: 'PENDING' | 'IN_PROGRESS' | 'IN_REVIEW' | 'COMPLETED' | 'NEEDS_FIX';
-  }): Promise<Result<TaskState>> {
+  async execute(input: { taskId: string; status: TaskState['status'] }): Promise<Result<TaskState>> {
     return this.stateManager.updateTaskStatus(input.taskId, input.status);
   }
 }
@@ -97,29 +70,27 @@ export class RecordFileChangeTool extends BaseTool {
         type: "string",
         description: "ID of the task"
       },
-      filePath: {
+      path: {
         type: "string",
-        description: "Path to the changed file"
+        description: "File path"
       },
-      changeType: {
+      type: {
         type: "string",
-        description: "Type of change",
+        description: "Change type",
         enum: ["CREATE", "UPDATE", "DELETE"]
       }
     },
-    required: ["taskId", "filePath", "changeType"]
+    required: ["taskId", "path", "type"]
   };
 
-  async execute(input: {
-    taskId: string;
-    filePath: string;
-    changeType: 'CREATE' | 'UPDATE' | 'DELETE';
-  }): Promise<Result<TaskState>> {
-    return this.stateManager.recordFileChange(input.taskId, {
-      path: input.filePath,
-      type: input.changeType,
+  async execute(input: { taskId: string; path: string; type: FileChange['type'] }): Promise<Result<TaskState>> {
+    const change: FileChange = {
+      path: input.path,
+      type: input.type,
       timestamp: Date.now()
-    });
+    };
+    
+    return this.stateManager.recordFileChange(input.taskId, change);
   }
 }
 
@@ -160,7 +131,7 @@ export class CreateTaskCheckpointTool extends BaseTool {
 
 export class RestoreTaskCheckpointTool extends BaseTool {
   name = 'restore_task_checkpoint';
-  description = 'Restore a task from a checkpoint';
+  description = 'Restore a task checkpoint';
   inputSchema: JSONSchema7 = {
     type: "object",
     properties: {

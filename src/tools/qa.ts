@@ -1,180 +1,179 @@
 import type { JSONSchema7 } from 'json-schema';
 import { BaseTool } from './base.js';
-import { TaskState, Result } from '../types.js';
+import { Result, WorkPackageState, TaskState } from '../types.js';
 
 export class StartQAReviewTool extends BaseTool {
   name = 'start_qa_review';
-  description = 'Start QA review for a task';
+  description = 'Start QA review for a work package';
   inputSchema: JSONSchema7 = {
     type: "object",
     properties: {
-      taskId: {
+      workPackageId: {
         type: "string",
-        description: "ID of the task to review"
+        description: "ID of the work package to review"
       }
     },
-    required: ["taskId"]
+    required: ["workPackageId"]
   };
 
-  async execute(input: { taskId: string }): Promise<Result<TaskState>> {
-    return this.stateManager.updateTaskStatus(input.taskId, 'IN_REVIEW');
+  async execute(input: { workPackageId: string }): Promise<Result<WorkPackageState>> {
+    const result = await this.stateManager.getWorkPackage(input.workPackageId);
+    if (!result.success) {
+      return result;
+    }
+
+    const workPackage = result.data;
+    workPackage.status = 'IN_REVIEW';
+    await this.stateManager.saveState();
+    
+    return { success: true, data: workPackage };
   }
 }
 
 export class CompleteQAReviewTool extends BaseTool {
   name = 'complete_qa_review';
-  description = 'Complete QA review for a task';
+  description = 'Complete QA review for a work package';
   inputSchema: JSONSchema7 = {
     type: "object",
     properties: {
-      taskId: {
+      workPackageId: {
         type: "string",
-        description: "ID of the task that was reviewed"
-      },
-      passed: {
-        type: "boolean",
-        description: "Whether the task passed QA review"
+        description: "ID of the work package"
       },
       feedback: {
         type: "string",
         description: "QA feedback"
-      }
-    },
-    required: ["taskId", "passed"]
-  };
-
-  async execute(input: {
-    taskId: string;
-    passed: boolean;
-    feedback?: string;
-  }): Promise<Result<TaskState>> {
-    const taskResult = await this.stateManager.getTask(input.taskId);
-    if (!taskResult.success) {
-      return taskResult;
-    }
-
-    const status = input.passed ? 'COMPLETED' : 'NEEDS_FIX';
-    
-    // First update the task status
-    const updateResult = await this.stateManager.updateTaskStatus(input.taskId, status);
-    if (!updateResult.success) {
-      return updateResult;
-    }
-
-    // If feedback was provided, record it
-    if (input.feedback) {
-      updateResult.data.metadata.qaFeedback = input.feedback;
-      await this.stateManager.saveState();
-    }
-
-    return updateResult;
-  }
-}
-
-export class RequestFixesTool extends BaseTool {
-  name = 'request_fixes';
-  description = 'Request fixes for a task that failed QA';
-  inputSchema: JSONSchema7 = {
-    type: "object",
-    properties: {
-      taskId: {
-        type: "string",
-        description: "ID of the task that needs fixes"
       },
       issues: {
         type: "array",
-        description: "List of issues that need to be fixed",
+        description: "List of issues found",
         items: {
           type: "object",
           properties: {
             description: {
               type: "string",
-              description: "Description of the issue"
+              description: "Issue description"
             },
             severity: {
               type: "string",
-              enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
-              description: "Severity of the issue"
+              description: "Issue severity",
+              enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
             }
           },
           required: ["description"]
         }
       }
     },
-    required: ["taskId", "issues"]
+    required: ["workPackageId", "feedback"]
   };
 
-  async execute(input: {
-    taskId: string;
-    issues: Array<{
-      description: string;
-      severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-    }>;
-  }): Promise<Result<TaskState>> {
-    const taskResult = await this.stateManager.getTask(input.taskId);
-    if (!taskResult.success) {
-      return taskResult;
+  async execute(input: { 
+    workPackageId: string; 
+    feedback: string; 
+    issues?: Array<{ description: string; severity?: string }>
+  }): Promise<Result<WorkPackageState>> {
+    const result = await this.stateManager.getWorkPackage(input.workPackageId);
+    if (!result.success) {
+      return result;
     }
 
-    // Update task status to needs fix
-    const updateResult = await this.stateManager.updateTaskStatus(input.taskId, 'NEEDS_FIX');
-    if (!updateResult.success) {
-      return updateResult;
+    const workPackage = result.data;
+    workPackage.metadata.qaFeedback = input.feedback;
+    
+    if (input.issues) {
+      workPackage.metadata.qaIssues = input.issues.map(issue => ({
+        description: issue.description,
+        severity: (issue.severity as any) || 'MEDIUM'
+      }));
     }
-
-    // Record the issues that need fixing
-    updateResult.data.metadata.qaIssues = input.issues;
+    
     await this.stateManager.saveState();
+    
+    return { success: true, data: workPackage };
+  }
+}
 
-    return updateResult;
+export class RequestFixesTool extends BaseTool {
+  name = 'request_fixes';
+  description = 'Request fixes for a task based on QA issues';
+  inputSchema: JSONSchema7 = {
+    type: "object",
+    properties: {
+      taskId: {
+        type: "string",
+        description: "ID of the task"
+      },
+      issues: {
+        type: "array",
+        description: "List of issues to fix",
+        items: {
+          type: "string",
+          description: "Issue description"
+        }
+      }
+    },
+    required: ["taskId"]
+  };
+
+  async execute(input: { 
+    taskId: string; 
+    issues?: string[] 
+  }): Promise<Result<TaskState>> {
+    const result = await this.stateManager.getTask(input.taskId);
+    if (!result.success) {
+      return result;
+    }
+
+    const task = result.data;
+    task.status = 'NEEDS_FIX';
+    
+    if (input.issues && input.issues.length > 0) {
+      task.metadata.fixIssues = input.issues;
+    }
+    
+    await this.stateManager.saveState();
+    
+    return { success: true, data: task };
   }
 }
 
 export class AcceptWorkPackageTool extends BaseTool {
   name = 'accept_workpackage';
-  description = 'Accept a completed work package after QA review';
+  description = 'Accept a work package as complete';
   inputSchema: JSONSchema7 = {
     type: "object",
     properties: {
       workPackageId: {
         type: "string",
-        description: "ID of the work package to accept"
+        description: "ID of the work package"
       },
       comments: {
         type: "string",
-        description: "Optional acceptance comments"
+        description: "Acceptance comments"
       }
     },
     required: ["workPackageId"]
   };
 
-  async execute(input: { workPackageId: string; comments?: string }): Promise<Result<any>> {
-    // Get the work package
-    const wpResult = await this.stateManager.getWorkPackage(input.workPackageId);
-    if (!wpResult.success) {
-      return wpResult;
+  async execute(input: { 
+    workPackageId: string; 
+    comments?: string 
+  }): Promise<Result<WorkPackageState>> {
+    const result = await this.stateManager.getWorkPackage(input.workPackageId);
+    if (!result.success) {
+      return result;
     }
 
-    // Verify all tasks are completed
-    const taskIds = wpResult.data.metadata.taskIds || [];
-    for (const taskId of taskIds) {
-      const taskResult = await this.stateManager.getTask(taskId);
-      if (!taskResult.success || taskResult.data.status !== 'COMPLETED') {
-        return {
-          success: false,
-          error: `Not all tasks are completed. Task ${taskId} is in status ${taskResult.success ? taskResult.data.status : 'NOT_FOUND'}`
-        };
-      }
-    }
-
-    // Update work package status and record acceptance
-    wpResult.data.status = 'COMPLETED';
-    wpResult.data.metadata.acceptedAt = Date.now();
+    const workPackage = result.data;
+    workPackage.status = 'COMPLETED';
+    workPackage.metadata.acceptedAt = Date.now();
+    
     if (input.comments) {
-      wpResult.data.metadata.acceptanceComments = input.comments;
+      workPackage.metadata.acceptanceComments = input.comments;
     }
-
+    
     await this.stateManager.saveState();
-    return wpResult;
+    
+    return { success: true, data: workPackage };
   }
 }
