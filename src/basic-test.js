@@ -2,33 +2,41 @@
 import { Buffer } from 'node:buffer';
 import process from 'process';
 
-// Function to write JSON-RPC message with Content-Length header
-const writeMessage = (message) => {
-  // Convert message to JSON string
-  const jsonStr = JSON.stringify(message).replace(/"/g, '\\"');
+// Helper to write protocol messages
+const writeMessage = (obj) => {
+  // Convert object to buffer directly
+  const parts = [];
   
-  // Create message with escaped quotes
-  const content = `{"jsonrpc":"2.0","id":${message.id}${
-    message.method ? `,"method":"${message.method}","params":${JSON.stringify(message.params)}}` :
-    `,"result":{"version":"1.0.0","capabilities":{"tools":{}}}}`
-  }`;
-
-  const contentLength = Buffer.byteLength(content);
-  const header = `Content-Length: ${contentLength}\r\n\r\n`;
-
-  // Write header and content in a single write
-  const fullMessage = Buffer.concat([
-    Buffer.from(header),
-    Buffer.from(content)
-  ]);
-
-  process.stdout.write(fullMessage, (err) => {
-    if (err) {
-      console.error('[ERROR] Write error:', err);
-    } else {
-      console.error('[DEBUG] Write complete:', content);
-    }
-  });
+  // Start message
+  parts.push(Buffer.from('{'));
+  
+  // Add jsonrpc
+  parts.push(Buffer.from('"jsonrpc":"2.0"'));
+  
+  // Add id
+  parts.push(Buffer.from(',"id":' + obj.id));
+  
+  if (obj.method) {
+    // Request message
+    parts.push(Buffer.from(',"method":"' + obj.method + '"'));
+    parts.push(Buffer.from(',"params":{}'));
+  } else {
+    // Response message 
+    parts.push(Buffer.from(',"result":{"version":"1.0.0","capabilities":{"tools":{}}}'));
+  }
+  
+  // End message
+  parts.push(Buffer.from('}'));
+  
+  // Combine into single buffer
+  const content = Buffer.concat(parts);
+  
+  // Create header
+  const header = Buffer.from(`Content-Length: ${content.length}\r\n\r\n`);
+  
+  // Write message
+  process.stdout.write(Buffer.concat([header, content]));
+  console.error('[DEBUG] Wrote message:', content.toString());
 };
 
 // Buffer for accumulating raw bytes
@@ -38,7 +46,7 @@ let expectedLength = null;
 // Handler for raw data
 const handleRawData = (chunk) => {
   // Append new data to buffer
-  rawBuffer = Buffer.concat([rawBuffer, chunk]);
+  rawBuffer = Buffer.concat([rawBuffer, chunk instanceof Buffer ? chunk : Buffer.from(chunk)]);
   
   // Process messages in buffer
   while (rawBuffer.length > 0) {
@@ -74,22 +82,20 @@ const handleRawData = (chunk) => {
         const parsed = JSON.parse(message);
         if (parsed.method === 'initialize') {
           // Send initialize response
-          const response = {
-            id: parsed.id
-          };
-          writeMessage(response);
-          console.error('[DEBUG] Sent initialize response');
+          writeMessage({ id: parsed.id });
+          console.error('[DEBUG] Sent response');
         }
       } catch (error) {
         console.error('[ERROR] Failed to parse message:', error);
       }
     } else {
-      return; // Wait for more data
+      console.error('[DEBUG] Waiting for more data. Have:', rawBuffer.length, 'need:', expectedLength);
+      break; // Wait for more data
     }
   }
 };
 
-// Set up raw buffer handling
+// Set up raw data handling
 process.stdin.on('data', handleRawData);
 
 process.stdin.on('end', () => {
@@ -97,7 +103,5 @@ process.stdin.on('end', () => {
   process.exit(0);
 });
 
-// Make sure stderr is flushed
-process.stderr.write('Basic MCP test server ready\n', () => {
-  process.stderr.write('[DEBUG] Server initialized\n');
-});
+// Ready to receive messages
+console.error('Basic MCP test server ready');

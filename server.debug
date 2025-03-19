@@ -1,10 +1,6 @@
-Basic MCP test server ready
-[DEBUG] Server initialized and ready for messages
-[DEBUG] Received raw chunk: Content-Length: 58
-
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-[DEBUG] Found content length: 58
-[DEBUG] Processing complete message of length: 58
-[DEBUG] Received: {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-[DEBUG] Sent message: {"jsonrpc":"2.0","id":1,"result":{"version":"1.0.0","capabilities":{"tools":{}}}}
-[DEBUG] Sent initialize response
+Server listening on port 44557
+Server: Client connected
+Server: Got initialize request
+Server: Sent initialize response
+Server: Client disconnected
+Server closed

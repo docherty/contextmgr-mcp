@@ -1,10 +1,16 @@
-# Contextmgr MCP Server
+# Context Manager MCP Server
 
-A Model Context Protocol (MCP) server implementation for managing development context and workflow, designed to store all state and data within the host project's directory structure.
+A Model Context Protocol (MCP) server implementation for managing development context and workflow.
 
-## Overview
+## Features
 
-Contextmgr MCP Server is designed to manage development workflow state and context within a project's own directory structure. It maintains state in a `contextmgr` directory within your project, enabling seamless workflow management and state persistence.
+- Socket-based transport with reliable message framing
+- Full JSON-RPC 2.0 protocol support
+- Session management with capability negotiation
+- Extensible tool registry system
+- Project, workpackage, and task management
+- Checkpoint and restore functionality
+- QA review workflow support
 
 ## Installation
 
@@ -14,164 +20,130 @@ npm install contextmgr-mcp
 
 ## Usage
 
-### Basic Setup
+### Starting the Server
+
+```bash
+# Start with default configuration
+npm start
+
+# Start with debug logging
+DEBUG=1 npm start
+
+# Start on specific port
+MCP_PORT=44558 npm start
+```
+
+### Development Mode
+
+```bash
+# Run with hot reloading
+npm run dev
+
+# Watch mode for TypeScript compilation
+npm run watch
+```
+
+## Architecture
+
+### Core Components
+
+1. **Message Framing**
+   - Content-Length based protocol
+   - Reliable message boundary handling
+   - Buffer management
+
+2. **Transport Layer**
+   - TCP socket-based communication
+   - Connection management
+   - Event-driven architecture
+
+3. **Session Management**
+   - Client session tracking
+   - Capability negotiation
+   - State persistence
+
+4. **Tool Registry**
+   - Dynamic tool registration
+   - Input validation
+   - Result formatting
+
+### Tools
+
+1. Project Management
+   - Create/Get projects
+   - Project checkpoints
+   - State restoration
+
+2. Work Package Management
+   - Create/Get work packages
+   - Progress tracking
+   - Status updates
+
+3. Task Management
+   - Create/Update tasks
+   - File change tracking
+   - Task checkpointing
+
+4. QA Tools
+   - Review workflow
+   - Fix requests
+   - Work package acceptance
+
+## Configuration
+
+Environment variables:
+
+- `DEBUG`: Enable debug logging (0/1)
+- `MCP_PORT`: Server port (default: 44557)
+
+## Protocol
+
+The server implements the Model Context Protocol with JSON-RPC 2.0:
 
 ```typescript
-import { ContextmgrServer } from 'contextmgr-mcp';
-
-const server = new ContextmgrServer({
-  projectRoot: process.cwd(),  // Your project's root directory
-  contextDir: 'contextmgr'     // Optional, defaults to 'contextmgr'
-});
-
-await server.initialize();
-await server.start();
+interface MCPMessage {
+  jsonrpc: "2.0";
+  id: number;
+  method?: string;      // for requests
+  params?: any;         // for requests
+  result?: any;         // for responses
+  error?: {             // for error responses
+    code: number;
+    message: string;
+    data?: any;
+  };
+}
 ```
 
-### Project Structure
+### Message Flow
 
-When initialized, the server creates the following structure in your project:
-
-```
-your-project/
-├── contextmgr/              # All MCP state and data
-│   ├── state.json          # Current state
-│   ├── checkpoints/        # State checkpoints
-│   └── temp/               # Temporary files
-└── ... rest of your project
-```
-
-## Features
-
-### Project Management
-- Create and manage projects
-- Track project status and roles
-- Create project checkpoints
-- Restore from checkpoints
-
-### Work Packages
-- Create work packages within projects
-- Track work package progress
-- Manage work package status
-- Group related tasks
-
-### Task Management
-- Create tasks within work packages
-- Track file changes
-- Record task progress
-- Create task checkpoints
-
-### QA Workflow
-- Start QA reviews
-- Record QA feedback
-- Request fixes
-- Accept completed work
-
-## MCP Tools
-
-### Project Tools
-- `create_project`: Create a new project
-- `get_project`: Get project details
-- `create_project_checkpoint`: Create project checkpoint
-- `restore_project_checkpoint`: Restore from checkpoint
-
-### Work Package Tools
-- `create_workpackage`: Create work package
-- `get_workpackage`: Get work package details
-- `update_workpackage_progress`: Update progress
-- `update_workpackage_status`: Update status
-
-### Task Tools
-- `create_task`: Create new task
-- `update_task_status`: Update task status
-- `record_file_change`: Record file changes
-- `create_task_checkpoint`: Create task checkpoint
-- `restore_task_checkpoint`: Restore task checkpoint
-
-### QA Tools
-- `start_qa_review`: Start QA review
-- `complete_qa_review`: Complete QA review
-- `request_fixes`: Request task fixes
-- `accept_workpackage`: Accept completed work package
-
-## Example Usage
-
-### Create a Project
-
-```typescript
-const result = await server.executeTool('create_project', {
-  name: 'My Project',
-  description: 'A sample project'
-});
-```
-
-### Create Work Package
-
-```typescript
-const result = await server.executeTool('create_workpackage', {
-  projectId: 'project-id',
-  name: 'Feature Implementation',
-  description: 'Implement new feature'
-});
-```
-
-### Create Task
-
-```typescript
-const result = await server.executeTool('create_task', {
-  workPackageId: 'workpackage-id',
-  name: 'Update Component',
-  description: 'Update component implementation',
-  filePath: 'src/components/MyComponent.ts'
-});
-```
-
-### Record File Change
-
-```typescript
-const result = await server.executeTool('record_file_change', {
-  taskId: 'task-id',
-  filePath: 'src/components/MyComponent.ts',
-  changeType: 'UPDATE'
-});
-```
-
-### Complete QA Review
-
-```typescript
-const result = await server.executeTool('complete_qa_review', {
-  taskId: 'task-id',
-  passed: true,
-  feedback: 'Implementation looks good'
-});
-```
-
-## State Management
-
-The server maintains all state in the project's `contextmgr` directory:
-
-- State is persisted in JSON format
-- Checkpoints are stored as separate files
-- File changes are tracked with metadata
+1. Client connects via TCP
+2. Client sends initialize request
+3. Server responds with capabilities
+4. Normal message exchange begins
+5. Client can shutdown/exit
 
 ## Development
 
-### Build
-
 ```bash
+# Install dependencies
+npm install
+
+# Build
 npm run build
-```
 
-### Run Tests
-
-```bash
+# Run tests
 npm test
 ```
 
-## License
-GNU Affero General Public License v3.0
-
-
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+ISC License

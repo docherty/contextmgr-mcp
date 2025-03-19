@@ -1,120 +1,153 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
-import { Readable, Writable } from 'stream';
-import fs from 'fs';
-import util from 'util';
+// MCP test with reliable transport
+import net from 'net';
+import { Buffer } from 'node:buffer';
+import process from 'process';
 
-// Debug log that ensures proper JSON formatting
-const debugLog = fs.createWriteStream('debug.log', { flags: 'w' });
-const debug = (msg, ...args) => {
-  debugLog.write('='.repeat(80) + '\n');
-  debugLog.write(`${msg}\n`);
-  if (args.length > 0) {
-    args.forEach((arg, i) => {
-      debugLog.write(`Arg ${i}:\n`);
-      if (typeof arg === 'string') {
-        // Show raw string content
-        debugLog.write(`Raw: ${arg}\n`);
-        debugLog.write(`Hex: ${Buffer.from(arg).toString('hex')}\n`);
-      } else {
-        // Pretty print objects
-        debugLog.write(util.inspect(arg, { depth: null, colors: false }) + '\n');
-      }
-    });
-  }
-  debugLog.write('='.repeat(80) + '\n');
+const port = 44557;
+
+// Message framing helper
+const writeMessage = (socket, message) => {
+  const jsonStr = JSON.stringify(message);
+  const content = Buffer.from(jsonStr);
+  const header = Buffer.from(`Content-Length: ${content.length}\r\n\r\n`);
+  socket.write(Buffer.concat([header, content]));
 };
 
-class MemoryStream extends Readable {
-  constructor(options) {
-    super(options);
-    this.buffer = Buffer.from('');
-  }
-  
-  _read() {}
-  
-  write(data) {
-    debug('Writing to stream', data.toString());
-    this.push(data);
-    return true;
-  }
+// Test server
+if (process.argv[2] === 'server') {
+  const server = net.createServer((socket) => {
+    process.stderr.write('Server: Client connected\n');
+
+    let buffer = '';
+    let expectedLength = null;
+
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString();
+      
+      // Process messages
+      while (buffer.length > 0) {
+        if (expectedLength === null) {
+          const match = buffer.match(/Content-Length: (\d+)\r\n\r\n/);
+          if (!match) return;
+          
+          expectedLength = parseInt(match[1], 10);
+          buffer = buffer.substring(match[0].length);
+        }
+
+        if (buffer.length >= expectedLength) {
+          const message = buffer.substring(0, expectedLength);
+          buffer = buffer.substring(expectedLength);
+          expectedLength = null;
+
+          try {
+            const parsed = JSON.parse(message);
+            if (parsed.method === 'initialize') {
+              process.stderr.write('Server: Got initialize request\n');
+              writeMessage(socket, {
+                jsonrpc: '2.0',
+                id: parsed.id,
+                result: {
+                  version: '1.0.0',
+                  capabilities: {
+                    tools: {}
+                  }
+                }
+              });
+              process.stderr.write('Server: Sent initialize response\n');
+            }
+          } catch (error) {
+            process.stderr.write(`Server error: ${error}\n`);
+          }
+        }
+      }
+    });
+
+    socket.on('end', () => {
+      process.stderr.write('Server: Client disconnected\n');
+      server.close();
+    });
+  });
+
+  server.listen(port, () => {
+    process.stderr.write(`Server listening on port ${port}\n`);
+  });
+
+  server.on('close', () => {
+    process.stderr.write('Server closed\n');
+    process.exit(0);
+  });
 }
 
-const inStream = new MemoryStream();
-const outStream = new Writable({
-  write(chunk, encoding, callback) {
-    debug('Server output', chunk.toString());
-    callback();
-  }
-});
+// Test client
+else {
+  process.stderr.write('Client starting\n');
 
-debug('Creating server');
-const server = new Server(
-  { name: 'test-mcp', version: '1.0.0' },
-  {
-    capabilities: {
-      tools: {
-        test_tool: {
-          description: 'A test tool',
-          inputSchema: { type: 'object', properties: {} }
+  const client = new net.Socket();
+
+  client.connect(port, 'localhost', () => {
+    process.stderr.write('Client connected\n');
+    
+    // Send initialize request
+    writeMessage(client, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {}
+    });
+    process.stderr.write('Client sent initialize request\n');
+  });
+
+  let buffer = '';
+  let expectedLength = null;
+
+  client.on('data', (chunk) => {
+    buffer += chunk.toString();
+    
+    // Process messages
+    while (buffer.length > 0) {
+      if (expectedLength === null) {
+        const match = buffer.match(/Content-Length: (\d+)\r\n\r\n/);
+        if (!match) return;
+        
+        expectedLength = parseInt(match[1], 10);
+        buffer = buffer.substring(match[0].length);
+      }
+
+      if (buffer.length >= expectedLength) {
+        const message = buffer.substring(0, expectedLength);
+        buffer = buffer.substring(expectedLength);
+        expectedLength = null;
+
+        try {
+          const parsed = JSON.parse(message);
+          if (parsed.id === 1) {
+            process.stderr.write('Client: Got initialize response\n');
+            client.end();
+          }
+        } catch (error) {
+          process.stderr.write(`Client error: ${error}\n`);
+          client.destroy();
+          process.exit(1);
         }
       }
     }
-  }
-);
+  });
 
-const ListToolsSchema = z.object({
-  jsonrpc: z.literal('2.0'),
-  method: z.literal('list_tools'),
-  params: z.object({}),
-  id: z.number()
-});
+  client.on('close', () => {
+    process.stderr.write('Client connection closed\n');
+    process.exit(0);
+  });
 
-server.setRequestHandler(ListToolsSchema, async (request) => {
-  debug('Handling request', request);
-  return {
-    tools: [{
-      name: 'test_tool',
-      description: 'A test tool',
-      inputSchema: { type: 'object', properties: {} }
-    }]
-  };
-});
-
-server.onerror = (error) => {
-  debug('Server error', error);
-};
-
-async function runTest() {
-  try {
-    const transport = new StdioServerTransport(inStream, outStream);
-    await server.connect(transport);
-    debug('Server ready');
-
-    // Create message without any string manipulation
-    const message = Buffer.from(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'list_tools',
-        params: {},
-        id: 1
-      }) + '\n',
-      'utf8'
-    );
-
-    debug('Sending message', message.toString());
-    inStream.write(message);
-    debug('Request sent');
-
-    // Keep process alive briefly to see response
-    await new Promise(resolve => setTimeout(resolve, 500));
-    debugLog.end();
-  } catch (error) {
-    debug('Error during test', error);
-    debugLog.end();
+  // Timeout in case no response
+  setTimeout(() => {
+    process.stderr.write('Client timeout\n');
+    client.destroy();
     process.exit(1);
-  }
+  }, 1000);
 }
 
-runTest();
+// Error handling
+process.on('uncaughtException', (error) => {
+  process.stderr.write(`Error: ${error}\n`);
+  process.exit(1);
+});

@@ -1,3 +1,5 @@
-[DEBUG] Starting basic client test
-[DEBUG] Sent message: {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-[DEBUG] Sent initialize request
+Client starting
+Client connected
+Client sent initialize request
+Client: Got initialize response
+Client connection closed

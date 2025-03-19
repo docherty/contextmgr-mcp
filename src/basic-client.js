@@ -2,88 +2,110 @@
 import { Buffer } from 'node:buffer';
 import process from 'process';
 
-// Function to write JSON-RPC message with Content-Length header
-const writeMessage = (message) => {
-  // Convert message to JSON and then to buffer to ensure proper handling
-  const jsonStr = JSON.stringify(message);
-  const contentBuffer = Buffer.from(jsonStr, 'utf8');
-  const headerStr = `Content-Length: ${contentBuffer.length}\r\n\r\n`;
-  const headerBuffer = Buffer.from(headerStr, 'utf8');
+// Helper to write protocol messages
+const writeMessage = (obj) => {
+  // Convert object to buffer directly
+  const parts = [];
   
-  // Write both buffers
-  process.stdout.write(headerBuffer);
-  process.stdout.write(contentBuffer);
+  // Start message
+  parts.push(Buffer.from('{'));
   
-  console.error('[DEBUG] Sent message:', jsonStr);
+  // Add jsonrpc
+  parts.push(Buffer.from('"jsonrpc":"2.0"'));
+  
+  // Add id
+  parts.push(Buffer.from(',"id":' + obj.id));
+  
+  if (obj.method) {
+    // Request message
+    parts.push(Buffer.from(',"method":"' + obj.method + '"'));
+    parts.push(Buffer.from(',"params":{}'));
+  } else {
+    // Response message 
+    parts.push(Buffer.from(',"result":{"version":"1.0.0","capabilities":{"tools":{}}}'));
+  }
+  
+  // End message
+  parts.push(Buffer.from('}'));
+  
+  // Combine into single buffer
+  const content = Buffer.concat(parts);
+  
+  // Create header
+  const header = Buffer.from(`Content-Length: ${content.length}\r\n\r\n`);
+  
+  // Write message
+  process.stdout.write(Buffer.concat([header, content]));
+  console.error('[DEBUG] Wrote message:', content.toString());
 };
 
 // Send initialize request
 const initialize = () => {
-  const request = {
-    jsonrpc: '2.0',
+  writeMessage({
     id: 1,
-    method: 'initialize',
-    params: {}
-  };
-  writeMessage(request);
+    method: 'initialize'
+  });
   console.error('[DEBUG] Sent initialize request');
 };
 
-// Buffer to accumulate incoming data
-let buffer = '';
-let contentLength = null;
+// Buffer for accumulating raw bytes
+let rawBuffer = Buffer.alloc(0);
+let expectedLength = null;
 
-// Handle messages
-const handleMessage = (msg) => {
-  console.error('[DEBUG] Processing message:', msg);
-  try {
-    const response = JSON.parse(msg);
-    if (response.id === 1) {
-      console.error('[DEBUG] Got initialize response:', JSON.stringify(response));
-      process.exit(0);
-    }
-  } catch (error) {
-    console.error('[ERROR] Failed to parse response:', error);
-    process.exit(1);
-  }
-};
-
-// Set up stdin handling
-process.stdin.setEncoding('utf8');
-
-process.stdin.on('data', (chunk) => {
-  console.error('[DEBUG] Received raw chunk:', chunk);
-  buffer += chunk;
-
-  // Process complete messages
-  while (buffer.length > 0) {
-    if (contentLength === null) {
-      const match = buffer.match(/Content-Length: (\d+)\r\n\r\n/);
-      if (!match) {
-        if (buffer.includes('\r\n\r\n')) {
-          // Invalid header
-          console.error('[ERROR] Invalid header in:', buffer);
-          process.exit(1);
-        }
+// Handler for raw data
+const handleRawData = (chunk) => {
+  // Append new data to buffer
+  rawBuffer = Buffer.concat([rawBuffer, chunk instanceof Buffer ? chunk : Buffer.from(chunk)]);
+  
+  // Process messages in buffer
+  while (rawBuffer.length > 0) {
+    if (expectedLength === null) {
+      // Look for header
+      const headerEnd = rawBuffer.indexOf(Buffer.from('\r\n\r\n'));
+      if (headerEnd === -1) {
         return; // Wait for complete header
       }
-      contentLength = parseInt(match[1], 10);
-      buffer = buffer.substring(match[0].length);
-      console.error('[DEBUG] Found content length:', contentLength);
+      
+      const header = rawBuffer.slice(0, headerEnd).toString();
+      const match = header.match(/Content-Length: (\d+)/);
+      if (!match) {
+        console.error('[ERROR] Invalid header:', header);
+        process.exit(1);
+      }
+      
+      expectedLength = parseInt(match[1], 10);
+      rawBuffer = rawBuffer.slice(headerEnd + 4); // Skip \r\n\r\n
+      
+      console.error('[DEBUG] Found content length:', expectedLength);
     }
 
-    if (buffer.length >= contentLength) {
-      const message = buffer.substring(0, contentLength);
-      buffer = buffer.substring(contentLength);
-      contentLength = null;
-      console.error('[DEBUG] Processing complete message of length:', message.length);
-      handleMessage(message);
+    if (rawBuffer.length >= expectedLength) {
+      const messageBuffer = rawBuffer.slice(0, expectedLength);
+      rawBuffer = rawBuffer.slice(expectedLength);
+      expectedLength = null;
+
+      const message = messageBuffer.toString();
+      console.error('[DEBUG] Received message:', message);
+
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed.id === 1) {
+          console.error('[DEBUG] Initialize complete');
+          process.exit(0);
+        }
+      } catch (error) {
+        console.error('[ERROR] Failed to parse message:', error);
+        process.exit(1);
+      }
     } else {
-      console.error('[DEBUG] Waiting for more data. Have:', buffer.length, 'need:', contentLength);
+      console.error('[DEBUG] Waiting for more data. Have:', rawBuffer.length, 'need:', expectedLength);
       break; // Wait for more data
     }
   }
-});
+};
+
+// Set up raw data handling
+process.stdin.on('data', handleRawData);
 
 process.stdin.on('end', () => {
   console.error('[DEBUG] Connection closed');
