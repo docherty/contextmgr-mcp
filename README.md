@@ -12,10 +12,14 @@ A Model Context Protocol (MCP) server implementation for managing development co
 - Checkpoint and restore functionality
 - QA review workflow support
 
-## Installation
+## Initial Setup
 
 ```bash
-npm install contextmgr-mcp
+# Install dependencies
+npm install
+
+# First-time build
+npm run build
 ```
 
 ## Usage
@@ -23,24 +27,48 @@ npm install contextmgr-mcp
 ### Starting the Server
 
 ```bash
-# Start with default configuration
+# Development mode (no build required, uses tsx for on-the-fly compilation)
+npm run dev
+
+# Production mode (requires build)
 npm start
 
 # Start with debug logging
-DEBUG=1 npm start
+DEBUG=1 npm run dev
 
 # Start on specific port
-MCP_PORT=44558 npm start
+MCP_PORT=44558 npm run dev
 ```
 
 ### Development Mode
 
 ```bash
-# Run with hot reloading
+# Run with hot reloading (preferred during development)
 npm run dev
 
-# Watch mode for TypeScript compilation
+# Watch mode for TypeScript compilation (if you prefer running the compiled version)
 npm run watch
+
+# In a separate terminal when using watch mode
+npm start
+```
+
+### Clean Start
+
+If you encounter any issues, you can try a clean build:
+
+```bash
+# Remove build artifacts
+rm -rf dist/
+
+# Reinstall dependencies
+npm ci
+
+# Rebuild the project
+npm run build
+
+# Start in development mode
+npm run dev
 ```
 
 ## Architecture
@@ -125,16 +153,7 @@ interface MCPMessage {
 
 ## Development
 
-```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Run tests
-npm test
-```
+See [Initial Setup](#initial-setup) and [Development Mode](#development-mode) sections above.
 
 ## Contributing
 
